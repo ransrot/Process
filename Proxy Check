@@ -1,0 +1,99 @@
+import sqlite3
+import requests
+import subprocess
+import socks
+import platform
+import time
+import psutil
+import threading
+import signal
+import os
+
+class DataBase:
+	def __init__(self):
+		self.connection = sqlite3.connect("userPublicIp.db")
+		self.c = self.connection.cursor()
+
+	def account_of_user(self):  # return the name of the person on the machine
+		return subprocess.check_output(["whoami"])
+
+	def get_platform(self):
+		return platform.system()
+
+	def ip_of_user(self):
+		req = requests.get("http://icanhazip.com")
+		return req.text
+
+	def make_table(self):  # create the table
+		self.c.execute("""CREATE TABLE IF NOT EXISTS userPubLicIP (
+			account text,
+			OS text,
+			IP text
+			)""")
+
+	def insert_to_table(self):
+		account = self.account_of_user()
+		os = self.get_platform()
+		ip = self.ip_of_user()
+		self.c.execute("SELECT * FROM userPublicIp WHERE (account=? AND os=? AND ip=?)", (account, os, ip))
+		entry = self.c.fetchone()
+		if entry is None:
+			self.c.execute("INSERT INTO userPublicIp VALUES (?, ?, ?)", (account, os, ip))
+			self.connection.commit()
+
+	def select_from_table(self):
+		account = self.account_of_user()
+		os = self.get_platform()
+		ip = self.ip_of_user()
+		self.c.execute("SELECT * FROM userPublicIp WHERE account=? AND OS=? AND IP=?", (account, os, ip))
+		return list(self.c.fetchone())
+
+
+class CheckIp(DataBase):
+	def __init__(self):
+		super().__init__()
+		self.browser_list = ["firefox", "google", "explorer"]  # add more here
+		self.process_id = []
+		self.user_list = DataBase.select_from_table(self)  # grab the data from the database
+		
+	def check_ip(self):
+		ip = self.user_list[2]
+		while True:
+			self.get_process_id()
+			req = DataBase.ip_of_user(self)
+			if ip == req:
+				try:
+					pid = self.process_id[0]
+					self.process_id = self.process_id.pop(0)
+					pid = int(pid)
+					os.kill(pid, signal.SIGKILL)
+					time.sleep(5)
+				except IndexError:
+					continue
+				except ProcessLookupError:
+					continue
+
+	def check_open_browsers(self):
+		for letters in self.browser_list:
+			try:
+				check_process = subprocess.check_output(["pgrep", letters])
+				yield check_process.decode().strip()
+			except subprocess.CalledProcessError:
+				continue
+
+	def get_process_id(self):
+		get_browsers = self.check_open_browsers()
+		for dictionaries in get_browsers:
+			if dictionaries in self.process_id:
+				continue
+			self.process_id.append(dictionaries)
+
+
+if __name__ == '__main__':
+	try:
+		DataBase().make_table()
+		DataBase().insert_to_table()
+		CheckIp().check_ip()
+	except KeyboardInterrupt:
+		print("\n[-] Exiting")
+		exit()
